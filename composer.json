@@ -1,0 +1,12 @@
+{
+    "name": "toril/food",
+    "description": "Nutrituion Planner",
+    "autoload": {
+        "psr-4": {
+            "Toril\\Food\\": "app/"
+        }
+    },
+    "require": {
+        "phpmailer/phpmailer": "^7.0"
+    }
+}
