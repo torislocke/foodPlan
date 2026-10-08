@@ -6,6 +6,7 @@
 /* ── Print: show only the print view ────────────────────────────────── */
 @media print {
     .site-header,
+    .site-footer,
     .day-tabs-wrapper,
     .planner-main,
     .week-summary-section,

@@ -5,8 +5,9 @@
     --green-mid:    #388e3c;
     --green-light:  #a5d6a7;
     --green-pale:   #e8f5e9;
-    --amber:        #e65100;
-    --amber-bg:     #fff3e0;
+    --yellow:       #f9a825;
+    --yellow-bg:    #fff8e1;
+    --yellow-text:  #8d6e00;   /* yellow readable as text on white */
     --red:          #c62828;
     --red-bg:       #ffebee;
     --bg:           #f1f4f1;
@@ -23,6 +24,7 @@
 /* ── Reset & base ─────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 [hidden] { display: none !important; }
+#printView { display: none; } /* shown by print.css when printing */
 body {
     font-family: system-ui, -apple-system, sans-serif;
     font-size: 14px;
@@ -106,6 +108,34 @@ input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(46,125,50,.
 }
 .logo { display: flex; align-items: center; gap: 8px; color: #fff; font-size: 17px; font-weight: 700; flex: 1; }
 .logo-icon { font-size: 22px; }
+a.logo { text-decoration: none; }
+
+.skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 8px;
+    z-index: 400;
+    background: var(--surface);
+    color: var(--green-dark);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-weight: 600;
+}
+.skip-link:focus { left: 8px; }
+
+.site-nav { display: flex; align-items: center; gap: 4px; }
+.site-nav-link {
+    color: rgba(255,255,255,.8);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: 6px;
+    transition: background .15s, color .15s;
+}
+.site-nav-link:hover { background: rgba(255,255,255,.15); color: #fff; }
+.site-nav-link.active { background: rgba(255,255,255,.2); color: #fff; }
+a.btn, a.btn-outline { text-decoration: none; }
 
 .week-nav { display: flex; align-items: center; gap: 10px; }
 .week-label { color: #fff; font-size: 14px; font-weight: 600; min-width: 200px; text-align: center; }
@@ -289,7 +319,7 @@ input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(46,125,50,.
     transition: width .4s ease;
     background: var(--green);
 }
-.progress-bar-fill.warning { background: var(--amber); }
+.progress-bar-fill.warning { background: var(--yellow); }
 .progress-bar-fill.over    { background: var(--red); }
 .calories-display {
     text-align: center;
@@ -301,7 +331,7 @@ input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(46,125,50,.
 .calories-goal { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .calories-status { font-size: 11px; font-weight: 600; margin-top: 4px; }
 .calories-status.ok   { color: var(--green); }
-.calories-status.low  { color: var(--amber); }
+.calories-status.low  { color: var(--yellow-text); }
 .calories-status.over { color: var(--red); }
 
 /* ── Week summary ─────────────────────────────────────────────────────── */
@@ -348,7 +378,7 @@ input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(46,125,50,.
 .week-table td:first-child, .week-table th:first-child { text-align: left; }
 .week-table tr:last-child td { border-bottom: none; }
 .week-table .cell-good { color: var(--green); font-weight: 600; }
-.week-table .cell-low  { color: var(--amber); font-weight: 600; }
+.week-table .cell-low  { color: var(--yellow-text); font-weight: 600; }
 .week-table .cell-over { color: var(--red); font-weight: 600; }
 .week-table .day-active { background: var(--green-pale); }
 
@@ -616,6 +646,181 @@ input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(46,125,50,.
 }
 .goals-divider::before { display: none; }
 
+/* ── Fitness profile ──────────────────────────────────────────────────── */
+.fitness-form { display: flex; flex-direction: column; gap: 10px; }
+.fitness-form .goals-divider::after { display: none; }
+.fitness-form .goals-divider { justify-content: space-between; }
+.unit-toggle { display: flex; gap: 12px; font-size: 12px; color: var(--text-muted); }
+.unit-toggle label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.unit-toggle input { width: auto; accent-color: var(--green); }
+.fitness-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+.fitness-grid .cf-row { display: flex; flex-direction: column; gap: 4px; }
+.fitness-grid .cf-row-full { grid-column: 1 / -1; }
+.fitness-grid label { font-size: 13px; font-weight: 600; }
+.fitness-grid .goal-input-wrap input { width: 80px; padding: 10px; }
+.fit-pair { display: flex; gap: 10px; }
+.fit-select {
+    font: inherit;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    background: var(--surface);
+    width: 100%;
+}
+.fit-select:focus { border-color: var(--green); outline: none; box-shadow: 0 0 0 3px rgba(46,125,50,.15); }
+#calcFitnessBtn { align-self: flex-start; }
+.fitness-grid .goal-input-wrap input { width: 96px; -moz-appearance: textfield; appearance: textfield; }
+.fitness-grid input::-webkit-outer-spin-button,
+.fitness-grid input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.fitness-form input::placeholder {
+    color: #b0b7bf;
+    font-style: italic;
+    opacity: 1;
+}
+.fitness-form .field-missing {
+    border-color: var(--red);
+    background: var(--red-bg);
+}
+.fitness-form .field-missing:focus { box-shadow: 0 0 0 3px rgba(198,40,40,.15); }
+
+.fitness-results { display: flex; flex-direction: column; gap: 10px; }
+.bmi-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border-left: 4px solid;
+}
+.bmi-value { font-size: 28px; font-weight: 800; line-height: 1; }
+.bmi-label { font-size: 14px; font-weight: 700; }
+.bmi-meta  { font-size: 12px; color: var(--text-muted); }
+.bmi-good    { background: var(--green-pale); border-color: var(--green); }
+.bmi-good    .bmi-value { color: var(--green); }
+.bmi-caution { background: var(--yellow-bg);  border-color: var(--yellow); }
+.bmi-caution .bmi-value { color: var(--yellow-text); }
+.bmi-warning { background: var(--red-bg);     border-color: var(--red); }
+.bmi-warning .bmi-value { color: var(--red); }
+
+.plan-prompt { font-size: 12px; color: var(--text-muted); }
+.plan-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.plan-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font: inherit;
+    text-align: left;
+    transition: border-color .15s, background .15s;
+}
+.plan-option:hover { border-color: var(--green-light); background: var(--green-pale); }
+.plan-option.selected { border-color: var(--green); background: var(--green-pale); box-shadow: 0 0 0 2px rgba(46,125,50,.2); }
+.plan-label { font-size: 12px; font-weight: 700; }
+.plan-cal   { font-size: 16px; font-weight: 800; color: var(--green-dark); }
+.plan-rate  { font-size: 11px; color: var(--text-muted); }
+.plan-floor { font-size: 11px; color: var(--yellow-text); font-weight: 600; }
+
+/* ── Profile card & modal ─────────────────────────────────────────────── */
+.profile-card {
+    margin-bottom: 18px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.profile-card--empty { background: var(--green-pale); border-color: var(--green-light); }
+.profile-card--empty .btn { align-self: flex-start; }
+.profile-card-title { font-size: 13px; font-weight: 700; color: var(--green-dark); }
+.profile-card-text  { font-size: 12px; color: var(--text-muted); }
+.profile-card-text strong { color: var(--text); }
+.profile-card-head { display: flex; align-items: center; gap: 8px; }
+.profile-card-head .btn-text { margin-left: auto; font-size: 12px; }
+.profile-card-cat { font-size: 13px; font-weight: 700; }
+.bmi-chip {
+    font-size: 12px;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1.5px solid;
+}
+.bmi-chip.bmi-good    { color: var(--green);       background: var(--green-pale); border-color: var(--green); }
+.bmi-chip.bmi-caution { color: var(--yellow-text); background: var(--yellow-bg);  border-color: var(--yellow); }
+.bmi-chip.bmi-warning { color: var(--red);         background: var(--red-bg);     border-color: var(--red); }
+.profile-intro { font-size: 13px; color: var(--text-muted); }
+.profile-callout {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 8px 12px;
+    border: 1px dashed var(--green-light);
+    border-radius: 8px;
+}
+.profile-callout .btn-text { font-size: 12px; }
+
+/* ── Vitamins & minerals ──────────────────────────────────────────────── */
+.micro-title { margin-top: 22px; }
+.micro-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font-size: 13px; }
+.micro-count strong { font-size: 16px; color: var(--green-dark); }
+.micro-over { color: var(--red); font-weight: 700; font-size: 12px; }
+.micro-basis { font-size: 11px; color: var(--text-muted); margin: 2px 0 8px; }
+.micro-basis .btn-text { font-size: 11px; }
+.micro-note {
+    font-size: 11px;
+    color: var(--yellow-text);
+    background: var(--yellow-bg);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-bottom: 8px;
+}
+.micro-group { margin-top: 6px; }
+.micro-group summary {
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: var(--text-muted);
+    padding: 4px 0;
+}
+.micro-row { padding: 5px 0; }
+.micro-row .progress-bar-track { height: 5px; }
+.micro-label { display: flex; align-items: baseline; gap: 6px; font-size: 12px; margin-bottom: 3px; }
+.micro-icon {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 14px;
+    text-align: center;
+    color: #fff;
+    align-self: center;
+}
+.micro-good    .micro-icon { background: var(--green); }
+.micro-caution .micro-icon { background: var(--yellow); color: #5c4700; }
+.micro-warning .micro-icon { background: var(--red); }
+.micro-name  { font-weight: 600; flex: 1; min-width: 0; }
+.micro-value { color: var(--text-muted); white-space: nowrap; }
+.micro-pct   { font-weight: 700; min-width: 38px; text-align: right; }
+.micro-good    .micro-pct { color: var(--green); }
+.micro-caution .micro-pct { color: var(--yellow-text); }
+.micro-warning .micro-pct { color: var(--red); }
+.micro-partial { color: var(--yellow-text); font-weight: 800; cursor: help; }
+.micro-footnote { font-size: 10px; color: var(--text-muted); margin-top: 8px; }
+.sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
 /* ── Toast ────────────────────────────────────────────────────────────── */
 .toast {
     position: fixed;
@@ -657,11 +862,7 @@ input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(46,125,50,.
 .auth-logout:hover { color: #fff; }
 .auth-links { display: flex; align-items: center; gap: 8px; }
 
-/* ── Auth modals ──────────────────────────────────────────────────────── */
-.auth-form  { display: flex; flex-direction: column; gap: 14px; }
-.auth-field { display: flex; flex-direction: column; gap: 5px; }
-.auth-field label { font-size: 13px; font-weight: 600; color: var(--text); }
-.auth-field input  { font-size: 14px; padding: 16px;}
+/* ── Inline form errors (profile modal) ───────────────────────────────── */
 .auth-error {
     background: var(--red-bg);
     color: var(--red);
@@ -671,39 +872,102 @@ input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(46,125,50,.
     font-size: 13px;
     font-weight: 500;
 }
-.auth-switch {
-    margin-top: 4px;
+
+/* ── Site-wide flash messages (after login, logout…) ──────────────────── */
+.site-flash {
+    max-width: 1280px;
+    margin: 12px auto 0;
+    padding: 10px 16px;
+    border-radius: 8px;
     font-size: 13px;
-    color: var(--text-muted);
+    font-weight: 600;
+    border: 1px solid;
+    width: calc(100% - 32px);
+}
+.site-flash--success { background: var(--green-pale); border-color: var(--green-light); color: var(--green-dark); }
+.site-flash--info    { background: #eef4fb; border-color: #bcd3ee; color: #1d4f86; }
+.site-flash--error   { background: var(--red-bg); border-color: #f5b5b5; color: var(--red); }
+
+/* ── Home page ────────────────────────────────────────────────────────── */
+.home-main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 56px 20px 24px;
     text-align: center;
 }
-.pw-wrap { position: relative; display: flex; align-items: center; }
-.pw-wrap input { width: 100%; padding-right: 52px; }
-.pw-toggle {
-    position: absolute;
-    right: 10px;
-    background: none;
-    border: none;
-    color: var(--green);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 700;
-    padding: 0;
-    white-space: nowrap;
-    text-decoration: underline;
+.home-main h1 { font-size: 28px; line-height: 1.25; color: var(--green-dark); margin-bottom: 14px; }
+.home-intro { font-size: 15px; color: var(--text-muted); margin-bottom: 24px; }
+.home-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; }
+a.btn-primary, a.btn-secondary { text-decoration: none; }
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+.site-footer {
+    margin-top: 40px;
+    background: var(--surface);
+    border-top: 3px solid var(--green);
+    color: var(--text);
 }
-.pw-toggle:hover { color: var(--green-dark); }
-.pw-match-hint { font-size: 12px; font-weight: 600; margin-top: 2px; }
-.pw-match-ok  { color: var(--green); }
-.pw-match-err { color: var(--red); }
+.footer-inner {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 28px 20px;
+    display: grid;
+    grid-template-columns: 1.4fr 1fr auto;
+    gap: 32px;
+}
+.footer-heading {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--green-dark);
+    margin-bottom: 10px;
+}
+.footer-about p { color: var(--text-muted); font-size: 13px; margin-bottom: 8px; }
+.footer-about a, .footer-nav a { color: var(--green); }
+.footer-disclaimer { font-style: italic; }
+.footer-nav { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.footer-nav a { text-decoration: none; }
+.footer-nav a:hover { text-decoration: underline; }
+
+.legend-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.legend-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border-left: 4px solid;
+    font-size: 13px;
+}
+.legend-swatch { flex: none; width: 14px; height: 14px; border-radius: 50%; margin-top: 3px; }
+.legend-good    { background: var(--green-pale); border-color: var(--green); }
+.legend-good    .legend-swatch { background: var(--green); }
+.legend-caution { background: var(--yellow-bg);  border-color: var(--yellow); }
+.legend-caution .legend-swatch { background: var(--yellow); }
+.legend-warning { background: var(--red-bg);     border-color: var(--red); }
+.legend-warning .legend-swatch { background: var(--red); }
+
+.footer-copy {
+    border-top: 1px solid var(--border);
+    text-align: center;
+    padding: 12px 20px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
 
 /* ── Responsive ───────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
     .planner-main { grid-template-columns: 1fr; }
     .nutrition-panel { position: static; }
+    .footer-inner { grid-template-columns: 1fr 1fr; }
+    .footer-legend { grid-column: 1 / -1; }
 }
 @media (max-width: 600px) {
     .meal-grid { grid-template-columns: 1fr; }
     .header-inner { gap: 8px; }
     .week-label { min-width: 140px; font-size: 12px; }
+    .site-nav { display: none; }
+    .fitness-grid { grid-template-columns: 1fr; }
+    .footer-inner { grid-template-columns: 1fr; gap: 20px; }
 }

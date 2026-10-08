@@ -32,7 +32,13 @@ class MealPlannerService
             $st = $this->pdo->prepare('SELECT * FROM nutritional_goals WHERE session_token = ? LIMIT 1');
             $st->execute([$token]);
         }
-        return $st->fetch() ?: $this->defaultGoals();
+        $goals = $st->fetch();
+        if (!$goals) {
+            return $this->defaultGoals();
+        }
+        // Internal columns stay server-side
+        unset($goals['id'], $goals['session_token'], $goals['user_id'], $goals['created_at'], $goals['updated_at']);
+        return $goals;
     }
 
     public function saveGoals(string $token, array $g, ?int $userId = null): void
@@ -54,19 +60,30 @@ class MealPlannerService
             (float) ($g['fat_g']     ?? 65),
             (float) ($g['fiber_g']   ?? 25),
             (float) ($g['sodium_mg'] ?? 2300),
+            // Optional fitness profile (null when not provided)
+            is_numeric($g['height_cm'] ?? null) ? (float) $g['height_cm'] : null,
+            is_numeric($g['weight_kg'] ?? null) ? (float) $g['weight_kg'] : null,
+            is_numeric($g['age'] ?? null)       ? (int)   $g['age']       : null,
+            in_array($g['gender'] ?? null, ['male', 'female'], true) ? $g['gender'] : null,
+            isset(FitnessService::ACTIVITY[$g['activity_level'] ?? '']) ? $g['activity_level'] : null,
+            in_array($g['weight_goal'] ?? null, ['lose', 'mild_lose', 'maintain', 'mild_gain', 'gain'], true)
+                ? $g['weight_goal'] : null,
         ];
 
         if ($existing) {
             $this->pdo->prepare('
                 UPDATE nutritional_goals
-                SET calories=?, protein_g=?, carbs_g=?, fat_g=?, fiber_g=?, sodium_mg=?, updated_at=NOW()
+                SET calories=?, protein_g=?, carbs_g=?, fat_g=?, fiber_g=?, sodium_mg=?,
+                    height_cm=?, weight_kg=?, age=?, gender=?, activity_level=?, weight_goal=?,
+                    updated_at=NOW()
                 WHERE id=?
             ')->execute([...$vals, $existing['id']]);
         } else {
             $this->pdo->prepare('
                 INSERT INTO nutritional_goals
-                    (session_token, user_id, calories, protein_g, carbs_g, fat_g, fiber_g, sodium_mg)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (session_token, user_id, calories, protein_g, carbs_g, fat_g, fiber_g, sodium_mg,
+                     height_cm, weight_kg, age, gender, activity_level, weight_goal)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ')->execute([$token, $userId, ...$vals]);
         }
     }
@@ -130,17 +147,25 @@ class MealPlannerService
 
         $scale = fn($v) => $v !== null ? round((float) $v * $s, 2) : null;
 
+        // Vitamins & minerals as JSON; NULL when the food reported none
+        $micros = [];
+        foreach (FoodApiService::micronutrientKeys() as $k) {
+            if (isset($n[$k]) && is_numeric($n[$k])) {
+                $micros[$k] = round((float) $n[$k] * $s, 3);
+            }
+        }
+
         $this->pdo->prepare('
             INSERT INTO meal_entries
                 (meal_plan_id, day_of_week, meal_type, fdc_id, food_name, brand_name,
                  serving_size, serving_unit, servings,
                  calories, protein_g, carbs_g, fat_g, fiber_g,
-                 sodium_mg, sugar_g, cholesterol_mg, saturated_fat_g)
+                 sodium_mg, sugar_g, cholesterol_mg, saturated_fat_g, micronutrients)
             VALUES
                 (:pid, :day, :meal, :fdc, :name, :brand,
                  :sz, :su, :sv,
                  :cal, :pro, :car, :fat, :fib,
-                 :sod, :sug, :cho, :sat)
+                 :sod, :sug, :cho, :sat, :mic)
         ')->execute([
             ':pid'  => $planId,
             ':day'  => (int)    $d['day_of_week'],
@@ -160,6 +185,7 @@ class MealPlannerService
             ':sug'  => $scale($n['sugar_g']         ?? null),
             ':cho'  => $scale($n['cholesterol_mg']  ?? null),
             ':sat'  => $scale($n['saturated_fat_g'] ?? null),
+            ':mic'  => $micros ? json_encode($micros) : null,
         ]);
 
         return (int) $this->pdo->lastInsertId();
@@ -189,22 +215,43 @@ class MealPlannerService
 
     public function getDailySummaries(array $entries): array
     {
-        $keys = ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g'];
-        $days = [];
+        $keys       = ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g'];
+        $microKeys  = FoodApiService::micronutrientKeys();
+        $days       = [];
 
         foreach ($entries as $e) {
             $d = (int) $e['day_of_week'];
             if (!isset($days[$d])) {
-                $days[$d] = array_fill_keys($keys, 0.0);
+                $days[$d] = array_fill_keys($keys, 0.0) + [
+                    'food_count'       => 0,
+                    'micro_food_count' => 0, // foods with any vitamin/mineral data
+                    'micros'         => array_fill_keys($microKeys, 0.0),
+                    'micro_reported' => array_fill_keys($microKeys, 0), // foods reporting each nutrient
+                ];
             }
             foreach ($keys as $k) {
                 $days[$d][$k] += (float) ($e[$k] ?? 0);
             }
+
+            $days[$d]['food_count']++;
+            $micros = json_decode((string) ($e['micronutrients'] ?? ''), true) ?: [];
+            if ($micros) {
+                $days[$d]['micro_food_count']++;
+            }
+            foreach ($micros as $k => $v) {
+                if (isset($days[$d]['micros'][$k])) {
+                    $days[$d]['micros'][$k] += (float) $v;
+                    $days[$d]['micro_reported'][$k]++;
+                }
+            }
         }
 
         foreach ($days as &$day) {
-            foreach ($day as $k => $v) {
-                $day[$k] = round($v, 1);
+            foreach ($keys as $k) {
+                $day[$k] = round($day[$k], 1);
+            }
+            foreach ($day['micros'] as $k => $v) {
+                $day['micros'][$k] = round($v, 2);
             }
         }
 

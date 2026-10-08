@@ -3,7 +3,7 @@
     "description": "Nutrituion Planner",
     "autoload": {
         "psr-4": {
-            "Toril\\Food\\": "app/"
+            "Toril\\Food\\": "food/"
         }
     },
     "require": {

@@ -12,6 +12,8 @@ const state = {
     selectedFood: null, // food object from search
     customFoods:  [],   // user-defined foods loaded at init
     activeTab:    'search', // 'search' | 'myfoods'
+    fitness:      null,     // BMI & calorie result for the saved profile
+    microTargets: null,     // { basis, personal, nutrients: [{ key, label, unit, group, target, upper }] }
 };
 
 const DAYS  = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
@@ -30,6 +32,7 @@ async function init() {
 
     setupEventListeners();
     await Promise.all([loadGoals(), loadWeekData(), loadCustomFoods()]);
+    await loadFitness();
     render();
 }
 
@@ -39,7 +42,9 @@ const api = CONFIG.baseUrl + 'api/';
 async function loadGoals() {
     try {
         const r = await fetch(api + 'goals.php');
-        state.goals = await r.json();
+        const { micronutrient_targets, ...goals } = await r.json();
+        state.goals        = goals;
+        state.microTargets = micronutrient_targets || null;
     } catch { state.goals = { calories: 2000, protein_g: 50, carbs_g: 250, fat_g: 65, fiber_g: 25, sodium_mg: 2300 }; }
 }
 
@@ -129,10 +134,12 @@ function normalizeCustomFood(f) {
 
 // ── Render ─────────────────────────────────────────────────────────────────── //
 function render() {
+    renderProfileCard();
     renderWeekNav();
     renderDayTabs();
     renderMealGrid();
     renderNutritionPanel();
+    renderMicronutrientPanel();
     renderWeekTable();
 }
 
@@ -274,6 +281,73 @@ function renderNutritionPanel() {
             </div>
         </div>`;
     }).join('')}`;
+}
+
+// Vitamins & minerals for the active day vs. recommended daily intake.
+// green = target met, yellow = below target, red = above the upper limit.
+function renderMicronutrientPanel() {
+    const el = document.getElementById('microSummary');
+    const t  = state.microTargets;
+    if (!t) { el.innerHTML = ''; return; }
+
+    const sum      = state.summaries[state.activeDay] || {};
+    const totals   = sum.micros || {};
+    const reported = sum.micro_reported || {};
+    const foods    = sum.food_count || 0;
+
+    const rows = t.nutrients.map(n => {
+        const val    = totals[n.key] || 0;
+        const pct    = val / n.target;
+        const status = n.upper && val > n.upper ? 'warning' : pct >= 1 ? 'good' : 'caution';
+        // Some foods that do carry vitamin data didn't report this nutrient
+        const partial = (reported[n.key] || 0) < (sum.micro_food_count || 0);
+        return { ...n, val, pct, status, partial };
+    });
+
+    const met  = rows.filter(r => r.status === 'good').length;
+    const over = rows.filter(r => r.status === 'warning').length;
+    const noData = foods - (sum.micro_food_count || 0);
+
+    const fmt = v => v === 0 ? '0' : v >= 100 ? Math.round(v).toLocaleString() : v >= 10 ? v.toFixed(0) : v >= 1 ? v.toFixed(1) : v.toFixed(2);
+    const icon = { good: '✓', caution: '!', warning: '⚠' };
+    const tip  = r => r.status === 'warning'
+        ? `Above the ${fmt(r.upper)} ${r.unit} upper limit`
+        : r.status === 'good' ? 'Daily target met' : `${fmt(Math.max(0, r.target - r.val))} ${r.unit} to go`;
+
+    const group = (key, title) => `
+        <details class="micro-group" open>
+            <summary>${title}</summary>
+            ${rows.filter(r => r.group === key).map(r => `
+            <div class="micro-row micro-${r.status}" title="${tip(r)}">
+                <div class="micro-label">
+                    <span class="micro-icon" aria-hidden="true">${icon[r.status]}</span>
+                    <span class="micro-name">${esc(r.label)}${r.partial
+                        ? `<sup class="micro-partial" title="Reported by ${reported[r.key] || 0} of ${sum.micro_food_count} foods">*</sup>` : ''}</span>
+                    <span class="micro-value">${fmt(r.val)} / ${fmt(r.target)} ${r.unit}</span>
+                    <span class="micro-pct">${Math.round(r.pct * 100)}%</span>
+                </div>
+                <div class="progress-bar-track">
+                    <div class="progress-bar-fill ${r.status === 'warning' ? 'over' : r.status === 'caution' ? 'warning' : ''}"
+                         style="width:${Math.min(100, Math.round(r.pct * 100))}%"></div>
+                </div>
+                <span class="sr-only">${tip(r)}</span>
+            </div>`).join('')}
+        </details>`;
+
+    el.innerHTML = `
+        <div class="micro-summary">
+            <span class="micro-count"><strong>${met}</strong> of ${rows.length} daily targets met</span>
+            ${over ? `<span class="micro-over">⚠ ${over} above upper limit</span>` : ''}
+        </div>
+        <p class="micro-basis">${esc(t.basis)}${t.personal ? ''
+            : ` · <button type="button" class="btn-text" data-open-profile>add your profile</button> for personal targets`}</p>
+        ${foods === 0 ? '<p class="micro-note">Add foods to this day to see how close you are to each target.</p>' : ''}
+        ${noData > 0 ? `<p class="micro-note">${noData} of ${foods} food${foods > 1 ? 's have' : ' has'} no vitamin &amp; mineral data
+            (custom foods, or foods added before this feature), so totals may be low.</p>` : ''}
+        ${group('vitamins', 'Vitamins')}
+        ${group('minerals', 'Minerals')}
+        ${rows.some(r => r.partial)
+            ? '<p class="micro-footnote">* Not reported by every food today, so the total may be low.</p>' : ''}`;
 }
 
 function renderWeekTable() {
@@ -666,6 +740,283 @@ function updateGoalHints(calories) {
     document.getElementById('hintFiber').textContent   = `${(fbG / cal * 1000).toFixed(1)}g per 1,000 kcal`;
 }
 
+// ── Fitness profile (BMI & calorie needs) ──────────────────────────────────── //
+const CM_PER_IN = 2.54;
+const LB_PER_KG = 2.20462;
+
+let fitnessChoice = null;       // weight_goal key picked from the results, e.g. 'maintain'
+let fitnessUnits  = 'imperial'; // which set of height/weight fields is showing
+
+function setUnits(units) {
+    fitnessUnits = units;
+    document.querySelector(`#fitnessForm input[name=units][value=${units}]`).checked = true;
+    document.querySelectorAll('#fitnessForm [data-units]').forEach(el => {
+        el.hidden = el.dataset.units !== units;
+    });
+    try { localStorage.setItem('plannerUnits', units); } catch {}
+}
+
+// Switching units carries the entered values across
+function convertFitnessUnits(units) {
+    const p = readFitnessForm();
+    setUnits(units);
+    fillFitnessMeasurements(p.height_cm, p.weight_kg);
+}
+
+function fillFitnessMeasurements(heightCm, weightKg) {
+    const h = parseFloat(heightCm), w = parseFloat(weightKg);
+    const totalIn = h / CM_PER_IN;
+    document.getElementById('fitCm').value     = h ? Math.round(h * 2) / 2 : '';
+    document.getElementById('fitKg').value     = w ? Math.round(w * 2) / 2 : '';
+    document.getElementById('fitFeet').value   = h ? Math.floor(totalIn / 12) : '';
+    document.getElementById('fitInches').value = h ? Math.round((totalIn % 12) * 2) / 2 : '';
+    document.getElementById('fitLb').value     = w ? Math.round(w * LB_PER_KG) : '';
+}
+
+function fillFitnessForm(g) {
+    fillFitnessMeasurements(g.height_cm, g.weight_kg);
+    document.getElementById('fitAge').value      = g.age || '';
+    document.getElementById('fitGender').value   = g.gender || '';
+    document.getElementById('fitActivity').value = g.activity_level || 'sedentary';
+    fitnessChoice = g.weight_goal || null;
+}
+
+// Always returns metric values for the API
+function readFitnessForm() {
+    const num = id => parseFloat(document.getElementById(id).value);
+    let height_cm, weight_kg;
+    if (fitnessUnits === 'metric') {
+        height_cm = num('fitCm');
+        weight_kg = num('fitKg');
+    } else {
+        const ft = num('fitFeet'), inch = num('fitInches') || 0;
+        height_cm = ft ? (ft * 12 + inch) * CM_PER_IN : NaN;
+        weight_kg = num('fitLb') / LB_PER_KG;
+    }
+    return {
+        height_cm: Number.isFinite(height_cm) ? Math.round(height_cm * 10) / 10 : null,
+        weight_kg: Number.isFinite(weight_kg) ? Math.round(weight_kg * 10) / 10 : null,
+        age:       parseInt(document.getElementById('fitAge').value, 10) || null,
+        gender:    document.getElementById('fitGender').value || null,
+        activity:  document.getElementById('fitActivity').value,
+    };
+}
+
+// Highlights empty required fields and names them; returns true when all are filled
+function checkFitnessFields() {
+    const required = fitnessUnits === 'metric'
+        ? [['fitCm', 'height'], ['fitKg', 'weight']]
+        : [['fitFeet', 'height (feet)'], ['fitLb', 'weight']];
+    required.push(['fitAge', 'age'], ['fitGender', 'gender']);
+
+    const missing = [];
+    required.forEach(([id, label]) => {
+        const el    = document.getElementById(id);
+        const empty = el.value.trim() === '';
+        el.classList.toggle('field-missing', empty);
+        el.setAttribute('aria-invalid', empty);
+        if (empty) missing.push(label);
+    });
+
+    const errEl = document.getElementById('fitnessError');
+    if (missing.length) {
+        const list = missing.length === 1 ? missing[0]
+            : missing.slice(0, -1).join(', ') + ' and ' + missing.at(-1);
+        errEl.textContent = `Please enter your ${list}.`;
+        errEl.hidden = false;
+        document.getElementById(required.find(([, l]) => l === missing[0])[0]).focus();
+    }
+    return missing.length === 0;
+}
+
+function clearFitnessMissing() {
+    document.querySelectorAll('#fitnessForm .field-missing').forEach(el => {
+        el.classList.remove('field-missing');
+        el.removeAttribute('aria-invalid');
+    });
+}
+
+function isFitnessComplete(p) {
+    return p.height_cm && p.weight_kg && p.age && p.gender;
+}
+
+async function fetchFitness(profile) {
+    const r = await fetch(api + 'fitness.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Could not calculate.');
+    return d;
+}
+
+// Profile as stored with the goals → the shape fitness.php expects
+function savedProfile(g = state.goals) {
+    return {
+        height_cm: parseFloat(g.height_cm) || null,
+        weight_kg: parseFloat(g.weight_kg) || null,
+        age:       parseInt(g.age, 10) || null,
+        gender:    g.gender || null,
+        activity:  g.activity_level || 'sedentary',
+    };
+}
+
+async function loadFitness() {
+    const p = savedProfile();
+    state.fitness = null;
+    if (!isFitnessComplete(p)) return;
+    try { state.fitness = await fetchFitness(p); } catch {}
+}
+
+async function calcFitness({ quiet = false } = {}) {
+    const errEl   = document.getElementById('fitnessError');
+    const profile = readFitnessForm();
+    errEl.hidden  = true;
+
+    if (!isFitnessComplete(profile)) {
+        if (!quiet) checkFitnessFields();
+        return;
+    }
+
+    const btn = document.getElementById('calcFitnessBtn');
+    btn.disabled = true;
+    try {
+        renderFitnessResults(await fetchFitness(profile));
+    } catch (e) {
+        errEl.textContent = e.message || 'Network error. Please try again.';
+        errEl.hidden = false;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function renderFitnessResults(d) {
+    const el = document.getElementById('fitnessResults');
+    const weekly = lb => lb === 0 ? 'keep current weight'
+        : `${lb > 0 ? '+' : '−'}${Math.abs(lb)} lb / week`;
+
+    el.innerHTML = `
+        <div class="bmi-card bmi-${d.bmi_status}">
+            <div class="bmi-value">${d.bmi}</div>
+            <div>
+                <div class="bmi-label">BMI · ${esc(d.bmi_category)}</div>
+                <div class="bmi-meta">Resting burn ${d.bmr.toLocaleString()} kcal ·
+                    with activity ${d.tdee.toLocaleString()} kcal / day</div>
+            </div>
+        </div>
+        <p class="plan-prompt">Choose a calorie target. It becomes your daily goal when you save.</p>
+        <div class="plan-options" role="radiogroup" aria-label="Weight goal">
+            ${d.plans.map(p => `
+                <button type="button" class="plan-option ${p.key === fitnessChoice ? 'selected' : ''}"
+                        role="radio" aria-checked="${p.key === fitnessChoice}"
+                        data-key="${p.key}" data-calories="${p.calories}">
+                    <span class="plan-label">${esc(p.label)}</span>
+                    <span class="plan-cal">${p.calories.toLocaleString()} kcal</span>
+                    <span class="plan-rate">${weekly(p.weekly_lb)}</span>
+                    ${p.floored ? `<span class="plan-floor">Limited to the ${d.min_calories.toLocaleString()} kcal safe minimum</span>` : ''}
+                </button>`).join('')}
+        </div>`;
+    el.hidden = false;
+
+    el.querySelectorAll('.plan-option').forEach(b => b.addEventListener('click', () => choosePlan(b)));
+}
+
+function choosePlan(btn) {
+    fitnessChoice = btn.dataset.key;
+    document.querySelectorAll('#fitnessResults .plan-option').forEach(b => {
+        const on = b === btn;
+        b.classList.toggle('selected', on);
+        b.setAttribute('aria-checked', on);
+    });
+}
+
+// ── Profile card (sidebar) & modal ─────────────────────────────────────────── //
+function renderProfileCard() {
+    const el = document.getElementById('profileCard');
+    const f  = state.fitness;
+
+    if (!f) {
+        el.className = 'profile-card profile-card--empty';
+        el.innerHTML = `
+            <p class="profile-card-title">Personalize your calorie goal</p>
+            <p class="profile-card-text">Enter your height, weight, age and gender to see your BMI
+                and the calories you need to lose, maintain or gain weight.</p>
+            <button type="button" class="btn btn-primary btn-sm" data-open-profile>Enter my details</button>`;
+        return;
+    }
+
+    const g      = state.goals;
+    const plan   = f.plans.find(p => p.key === g.weight_goal);
+    const inches = Math.round(parseFloat(g.height_cm) / CM_PER_IN);
+    const stats  = `${Math.floor(inches / 12)}′${inches % 12}″ · `
+        + `${Math.round(parseFloat(g.weight_kg) * LB_PER_KG)} lb · ${g.age} yrs · ${g.gender === 'male' ? 'Male' : 'Female'}`;
+
+    el.className = 'profile-card';
+    el.innerHTML = `
+        <div class="profile-card-head">
+            <span class="bmi-chip bmi-${f.bmi_status}">BMI ${f.bmi}</span>
+            <span class="profile-card-cat">${esc(f.bmi_category)}</span>
+            <button type="button" class="btn-text" data-open-profile>Edit</button>
+        </div>
+        <p class="profile-card-text">${stats}</p>
+        <p class="profile-card-text">${plan
+            ? `Goal: <strong>${esc(plan.label)}</strong> · ${plan.calories.toLocaleString()} kcal / day`
+            : `Maintenance: <strong>${f.tdee.toLocaleString()} kcal / day</strong>`}</p>`;
+}
+
+function openProfileModal() {
+    fillFitnessForm(state.goals);
+    clearFitnessMissing();
+    document.getElementById('fitnessError').hidden   = true;
+    document.getElementById('fitnessResults').hidden = true;
+    calcFitness({ quiet: true });
+    showModal('profileModalBackdrop');
+}
+
+async function handleSaveProfile() {
+    const errEl   = document.getElementById('fitnessError');
+    const profile = readFitnessForm();
+    if (!isFitnessComplete(profile)) {
+        checkFitnessFields();
+        return;
+    }
+
+    const data = {
+        ...state.goals,
+        height_cm:      profile.height_cm,
+        weight_kg:      profile.weight_kg,
+        age:            profile.age,
+        gender:         profile.gender,
+        activity_level: profile.activity,
+        weight_goal:    fitnessChoice,
+    };
+
+    // The chosen calorie target becomes the goal; macros follow USDA guidelines
+    const picked = document.querySelector('#fitnessResults .plan-option.selected');
+    if (picked) {
+        const cal = parseInt(picked.dataset.calories, 10);
+        const { sodium_mg, ...macros } = calcUsda(cal);
+        Object.assign(data, { calories: cal }, macros);
+    }
+
+    const btn = document.getElementById('saveProfileBtn');
+    btn.disabled = true;
+    try {
+        await saveGoals(data);
+        await loadGoals(); // also refreshes the vitamin & mineral targets
+        await loadFitness();
+        hideModal('profileModalBackdrop');
+        render();
+        toast(picked ? `Profile saved. Daily goal set to ${data.calories.toLocaleString()} kcal.` : 'Profile saved!');
+    } catch {
+        errEl.textContent = 'Could not save. Please try again.';
+        errEl.hidden = false;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 // ── Goals modal ────────────────────────────────────────────────────────────── //
 function openGoalsModal() {
     const g   = state.goals;
@@ -687,6 +1038,16 @@ async function handleSaveGoals() {
     const data = Object.fromEntries(
         [...form.querySelectorAll('input')].map(i => [i.name, parseFloat(i.value) || 0])
     );
+    // Keep the saved profile; a hand-edited calorie goal no longer matches a weight-goal plan
+    const g = state.goals;
+    Object.assign(data, {
+        height_cm:      g.height_cm ?? null,
+        weight_kg:      g.weight_kg ?? null,
+        age:            g.age ?? null,
+        gender:         g.gender ?? null,
+        activity_level: g.activity_level ?? null,
+        weight_goal:    data.calories === parseFloat(g.calories) ? (g.weight_goal ?? null) : null,
+    });
     document.getElementById('saveGoalsBtn').disabled = true;
     try {
         await saveGoals(data);
@@ -738,91 +1099,6 @@ function toast(msg) {
 }
 
 // ── Auth ───────────────────────────────────────────────────────────────────── //
-function showAuthError(id, msg) {
-    const el = document.getElementById(id);
-    el.textContent = msg;
-    el.hidden = false;
-}
-
-async function handleLogin() {
-    const email    = document.getElementById('loginEmail').value.trim();
-    const password = document.getElementById('loginPassword').value;
-    document.getElementById('loginError').hidden = true;
-
-    if (!email || !password) {
-        showAuthError('loginError', 'Please enter your email and password.');
-        return;
-    }
-
-    const btn = document.getElementById('submitLogin');
-    btn.disabled = true;
-    try {
-        const r = await fetch(CONFIG.baseUrl + 'api/auth.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'login', email, password, csrf: CONFIG.csrf }),
-        });
-        const d = await r.json();
-        if (d.success) {
-            window.location.reload();
-        } else {
-            showAuthError('loginError', d.error || 'Login failed. Please check your credentials.');
-        }
-    } catch {
-        showAuthError('loginError', 'Network error. Please try again.');
-    } finally {
-        btn.disabled = false;
-    }
-}
-
-async function handleRegister() {
-    const name      = document.getElementById('regName').value.trim();
-    const email     = document.getElementById('regEmail').value.trim();
-    const password  = document.getElementById('regPassword').value;
-    const confirmPw = document.getElementById('regConfirm').value;
-    document.getElementById('registerError').hidden = true;
-
-    if (!name || !email || !password || !confirmPw) {
-        showAuthError('registerError', 'Please fill in all fields.');
-        return;
-    }
-    if (password.length < 8) {
-        showAuthError('registerError', 'Password must be at least 8 characters.');
-        document.getElementById('regPassword').focus();
-        return;
-    }
-    if (password !== confirmPw) {
-        showAuthError('registerError', 'Passwords do not match.');
-        document.getElementById('regConfirm').select();
-        document.getElementById('regConfirm').focus();
-        return;
-    }
-
-    const btn = document.getElementById('submitRegister');
-    btn.disabled = true;
-    try {
-        const r = await fetch(CONFIG.baseUrl + 'api/auth.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'register', name, email, password, confirm: confirmPw, csrf: CONFIG.csrf }),
-        });
-        const d = await r.json();
-        if (d.success) {
-            window.location.reload();
-        } else {
-            showAuthError('registerError', d.error || 'Registration failed. Please try again.');
-        }
-    } catch {
-        showAuthError('registerError', 'Network error. Please try again.');
-    } finally {
-        btn.disabled = false;
-    }
-}
-
-function handleLogout() {
-    window.location.href = CONFIG.baseUrl + 'logout.php';
-}
-
 // ── Print ──────────────────────────────────────────────────────────────────── //
 function printMealPlan() {
     const mon = new Date(state.weekStart + 'T00:00:00');
@@ -890,6 +1166,39 @@ function setupEventListeners() {
     // Auto-calculate macros when calorie goal changes
     document.getElementById('goalCalories').addEventListener('input', e => {
         applyUsdaToForm(e.target.value);
+    });
+
+    // Fitness profile → BMI & calorie targets
+    let savedUnits = 'imperial';
+    try { savedUnits = localStorage.getItem('plannerUnits') || 'imperial'; } catch {}
+    setUnits(savedUnits === 'metric' ? 'metric' : 'imperial');
+    document.querySelectorAll('#fitnessForm input[name=units]').forEach(r => {
+        r.addEventListener('change', () => convertFitnessUnits(r.value));
+    });
+    document.getElementById('calcFitnessBtn').addEventListener('click', () => calcFitness());
+    document.getElementById('fitnessForm').addEventListener('input', e => {
+        if (e.target.classList.contains('field-missing') && e.target.value.trim() !== '') {
+            e.target.classList.remove('field-missing');
+            e.target.removeAttribute('aria-invalid');
+        }
+    });
+
+    // Profile modal — opened from the header, the sidebar card, or the goals modal
+    document.getElementById('profileBtn').addEventListener('click', openProfileModal);
+    ['profileCard', 'microSummary'].forEach(id => {
+        document.getElementById(id).addEventListener('click', e => {
+            if (e.target.closest('[data-open-profile]')) openProfileModal();
+        });
+    });
+    document.getElementById('goalsOpenProfile').addEventListener('click', () => {
+        hideModal('goalsModalBackdrop');
+        openProfileModal();
+    });
+    document.getElementById('closeProfileModal').addEventListener('click', () => hideModal('profileModalBackdrop'));
+    document.getElementById('cancelProfile').addEventListener('click', () => hideModal('profileModalBackdrop'));
+    document.getElementById('saveProfileBtn').addEventListener('click', handleSaveProfile);
+    document.getElementById('fitnessForm').addEventListener('keydown', e => {
+        if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); calcFitness(); }
     });
 
     // Update percentage hints when a macro is manually edited
@@ -962,60 +1271,6 @@ function setupEventListeners() {
     document.getElementById('printBtn').addEventListener('click', printMealPlan);
 
     // Auth — elements are conditional on PHP login state
-    const loginBtn    = document.getElementById('loginBtn');
-    const registerBtn = document.getElementById('registerBtn');
-    const logoutBtn   = document.getElementById('logoutBtn');
-    if (loginBtn)    loginBtn.addEventListener('click', () => showModal('loginModalBackdrop'));
-    if (registerBtn) registerBtn.addEventListener('click', () => showModal('registerModalBackdrop'));
-    if (logoutBtn)   logoutBtn.addEventListener('click', handleLogout);
-
-    document.getElementById('closeLoginModal').addEventListener('click', () => hideModal('loginModalBackdrop'));
-    document.getElementById('cancelLogin').addEventListener('click', () => hideModal('loginModalBackdrop'));
-    document.getElementById('submitLogin').addEventListener('click', handleLogin);
-    document.getElementById('switchToRegister').addEventListener('click', () => {
-        hideModal('loginModalBackdrop');
-        showModal('registerModalBackdrop');
-    });
-
-    document.getElementById('closeRegisterModal').addEventListener('click', () => hideModal('registerModalBackdrop'));
-    document.getElementById('cancelRegister').addEventListener('click', () => hideModal('registerModalBackdrop'));
-    document.getElementById('submitRegister').addEventListener('click', handleRegister);
-    document.getElementById('switchToLogin').addEventListener('click', () => {
-        hideModal('registerModalBackdrop');
-        showModal('loginModalBackdrop');
-    });
-
-    document.getElementById('loginModalBackdrop').addEventListener('click', e => {
-        if (e.target === e.currentTarget) hideModal('loginModalBackdrop');
-    });
-    document.getElementById('registerModalBackdrop').addEventListener('click', e => {
-        if (e.target === e.currentTarget) hideModal('registerModalBackdrop');
-    });
-
-    // Show / hide password toggles
-    document.querySelectorAll('.pw-toggle').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const input   = document.getElementById(btn.dataset.target);
-            const showing = input.type === 'text';
-            input.type    = showing ? 'password' : 'text';
-            btn.textContent = showing ? 'Show' : 'Hide';
-        });
-    });
-
-    // Live password-match indicator on the confirm field
-    function checkPasswordMatch() {
-        const pw   = document.getElementById('regPassword').value;
-        const cfm  = document.getElementById('regConfirm').value;
-        const hint = document.getElementById('pwMatchHint');
-        document.getElementById('registerError').hidden = true;
-        if (!cfm) { hint.hidden = true; return; }
-        const match = pw === cfm;
-        hint.hidden      = false;
-        hint.textContent = match ? '✓ Passwords match' : '✗ Passwords do not match';
-        hint.className   = 'pw-match-hint ' + (match ? 'pw-match-ok' : 'pw-match-err');
-    }
-    document.getElementById('regPassword').addEventListener('input', checkPasswordMatch);
-    document.getElementById('regConfirm').addEventListener('input', checkPasswordMatch);
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────── //

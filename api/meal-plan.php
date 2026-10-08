@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
-require_once dirname(__DIR__) . '/app/config/planner_bootstrap.php';
+$appRoot = is_dir(dirname(__DIR__) . '/food/config')
+    ? dirname(__DIR__)                    // local: food/ inside the project
+    : dirname($_SERVER['DOCUMENT_ROOT']); // server: food/ beside public_html
+require_once $appRoot . '/food/config/planner_bootstrap.php';
 
 use Toril\Food\Service\MealPlannerService;
 

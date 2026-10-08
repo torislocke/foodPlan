@@ -2,9 +2,13 @@
 
 declare(strict_types=1);
 
-require_once dirname(__DIR__) . '/app/config/planner_bootstrap.php';
+$appRoot = is_dir(dirname(__DIR__) . '/food/config')
+    ? dirname(__DIR__)                    // local: food/ inside the project
+    : dirname($_SERVER['DOCUMENT_ROOT']); // server: food/ beside public_html
+require_once $appRoot . '/food/config/planner_bootstrap.php';
 
 use Toril\Food\Service\MealPlannerService;
+use Toril\Food\Service\MicronutrientService;
 
 header('Content-Type: application/json');
 
@@ -13,7 +17,13 @@ $token   = MealPlannerService::getToken();
 $userId  = $currentUserId ?? null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    echo json_encode($planner->getGoals($token, $userId));
+    $goals = $planner->getGoals($token, $userId);
+    // Vitamin & mineral targets follow the profile's gender and age
+    $goals['micronutrient_targets'] = (new MicronutrientService())->targets(
+        $goals['gender'] ?? null,
+        isset($goals['age']) ? (int) $goals['age'] : null
+    );
+    echo json_encode($goals);
     exit;
 }
 
