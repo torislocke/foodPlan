@@ -10,6 +10,16 @@ class MealPlannerService
 
     // ── Session token ─────────────────────────────────────────────────────── //
 
+    /**
+     * Value stored in session_token (unique per plan week / goals row). Account
+     * rows use a per-user key so a browser token already tied to another
+     * account (e.g. after switching users) can never collide.
+     */
+    private static function ownerKey(string $token, ?int $userId): string
+    {
+        return $userId ? 'user-' . $userId : $token;
+    }
+
     public static function getToken(): string
     {
         if (session_status() === PHP_SESSION_NONE) {
@@ -84,7 +94,7 @@ class MealPlannerService
                     (session_token, user_id, calories, protein_g, carbs_g, fat_g, fiber_g, sodium_mg,
                      height_cm, weight_kg, age, gender, activity_level, weight_goal)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ')->execute([$token, $userId, ...$vals]);
+            ')->execute([self::ownerKey($token, $userId), $userId, ...$vals]);
         }
     }
 
@@ -107,7 +117,7 @@ class MealPlannerService
 
         $this->pdo->prepare(
             'INSERT INTO meal_plans (session_token, user_id, week_start) VALUES (?, ?, ?)'
-        )->execute([$token, $userId, $weekStart]);
+        )->execute([self::ownerKey($token, $userId), $userId, $weekStart]);
 
         return (int) $this->pdo->lastInsertId();
     }

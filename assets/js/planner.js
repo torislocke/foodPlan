@@ -32,6 +32,7 @@ async function init() {
 
     setupEventListeners();
     await Promise.all([loadGoals(), loadWeekData(), loadCustomFoods()]);
+    renderCustomFoodMicroFields();
     await loadFitness();
     render();
 }
@@ -110,6 +111,15 @@ async function saveCustomFoodApi(data) {
 
 // Convert a custom_foods DB row into the standard food-object shape
 function normalizeCustomFood(f) {
+    let micros = {};
+    if (f.micronutrients) {
+        if (typeof f.micronutrients === 'string') {
+            try { micros = JSON.parse(f.micronutrients); } catch { micros = {}; }
+        } else {
+            micros = f.micronutrients;
+        }
+    }
+
     return {
         fdc_id:       f.id,
         name:         f.food_name,
@@ -128,6 +138,7 @@ function normalizeCustomFood(f) {
             sugar_g:         f.sugar_g         !== null ? parseFloat(f.sugar_g)         : null,
             cholesterol_mg:  f.cholesterol_mg  !== null ? parseFloat(f.cholesterol_mg)  : null,
             saturated_fat_g: f.saturated_fat_g !== null ? parseFloat(f.saturated_fat_g) : null,
+            ...micros,
         },
     };
 }
@@ -538,6 +549,37 @@ function renderMyFoodsList() {
     });
 }
 
+// Build the vitamin/mineral inputs in the custom-food form from the same
+// nutrient list used for daily targets (so labels/units/grouping stay in sync).
+function renderCustomFoodMicroFields() {
+    const grid = document.getElementById('cfMicroGrid');
+    const nutrients = state.microTargets?.nutrients;
+    if (!grid || !nutrients) return;
+
+    const section = (title, key) => `
+        <div class="cf-section-label">${esc(title)} — per serving (optional)</div>
+        <div class="cf-grid">
+            ${nutrients.filter(n => n.group === key).map(n => `
+            <div class="cf-row">
+                <label for="cf_micro_${n.key}">${esc(n.label)} (${esc(n.unit)})</label>
+                <input type="number" id="cf_micro_${n.key}" name="micro_${n.key}"
+                    min="0" step="any" placeholder="—">
+            </div>`).join('')}
+        </div>`;
+
+    grid.innerHTML = section('Vitamins', 'vitamins') + section('Minerals', 'minerals');
+}
+
+function collectCustomFoodMicros() {
+    const nutrients = state.microTargets?.nutrients || [];
+    const micros = {};
+    nutrients.forEach(n => {
+        const el = document.getElementById(`cf_micro_${n.key}`);
+        if (el && el.value !== '') micros[n.key] = parseFloat(el.value);
+    });
+    return micros;
+}
+
 function showCustomFoodForm() {
     document.getElementById('customFoodsList').hidden    = true;
     document.getElementById('showCustomFormBtn').hidden  = true;
@@ -567,6 +609,12 @@ async function handleSaveCustomFood() {
         toast('Calories are required.');
         return;
     }
+    const cfServingUnitEl = document.getElementById('cfServingUnit');
+    if (/^\d+\.?\d*$/.test(cfServingUnitEl.value.trim())) {
+        cfServingUnitEl.focus();
+        toast('Unit should be a measurement like g, oz or cup — not a number.');
+        return;
+    }
 
     const numOrNull = id => {
         const v = document.getElementById(id).value;
@@ -587,6 +635,7 @@ async function handleSaveCustomFood() {
         sugar_g:         numOrNull('cfSugar'),
         cholesterol_mg:  numOrNull('cfCholesterol'),
         saturated_fat_g: numOrNull('cfSatFat'),
+        micronutrients:  collectCustomFoodMicros(),
     };
 
     const btn = document.getElementById('saveCustomFoodBtn');
@@ -686,7 +735,7 @@ async function confirmFoodAdd() {
             render();
             toast('Food added!');
         } else {
-            toast('Could not add food. Please try again.');
+            toast(r.error || 'Could not add food. Please try again.');
             document.getElementById('confirmFoodAdd').disabled = false;
         }
     } catch {

@@ -166,6 +166,10 @@ require_once __DIR__ . '/common/header.php';
                                 </div>
                             </div>
 
+                            <div id="cfMicroGrid">
+                                <!-- Rendered by JS from the same list used for daily targets -->
+                            </div>
+
                         </form>
                         <div class="cf-actions">
                             <button type="button" class="btn btn-secondary" id="cancelCustomFood">Back to List</button>

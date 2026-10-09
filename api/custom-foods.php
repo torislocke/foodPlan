@@ -7,6 +7,7 @@ $appRoot = is_dir(dirname(__DIR__) . '/food/config')
     : dirname($_SERVER['DOCUMENT_ROOT']); // server: food/ beside public_html
 require_once $appRoot . '/food/config/planner_bootstrap.php';
 
+use Toril\Food\Service\FoodApiService;
 use Toril\Food\Service\MealPlannerService;
 
 header('Content-Type: application/json');
@@ -41,15 +42,24 @@ if ($method === 'POST') {
     $num = fn($key) => isset($d[$key]) && $d[$key] !== '' && $d[$key] !== null
         ? (float) $d[$key] : null;
 
+    // Vitamins & minerals as entered per serving; NULL when none given
+    $micros = [];
+    foreach (FoodApiService::micronutrientKeys() as $k) {
+        $v = $d['micronutrients'][$k] ?? null;
+        if ($v !== null && $v !== '' && is_numeric($v)) {
+            $micros[$k] = round((float) $v, 3);
+        }
+    }
+
     $st = $pdo->prepare('
         INSERT INTO custom_foods
             (session_token, user_id, food_name, brand_name, serving_size, serving_unit,
              calories, protein_g, carbs_g, fat_g, fiber_g,
-             sodium_mg, sugar_g, cholesterol_mg, saturated_fat_g)
+             sodium_mg, sugar_g, cholesterol_mg, saturated_fat_g, micronutrients)
         VALUES
             (:tok, :uid, :name, :brand, :sz, :su,
              :cal, :pro, :car, :fat, :fib,
-             :sod, :sug, :cho, :sat)
+             :sod, :sug, :cho, :sat, :mic)
     ');
 
     $st->execute([
@@ -68,6 +78,7 @@ if ($method === 'POST') {
         ':sug'  => $num('sugar_g'),
         ':cho'  => $num('cholesterol_mg'),
         ':sat'  => $num('saturated_fat_g'),
+        ':mic'  => $micros ? json_encode($micros) : null,
     ]);
 
     $id = (int) $pdo->lastInsertId();
@@ -92,6 +103,7 @@ if ($method === 'POST') {
                 'sugar_g'         => $num('sugar_g'),
                 'cholesterol_mg'  => $num('cholesterol_mg'),
                 'saturated_fat_g' => $num('saturated_fat_g'),
+                ...$micros,
             ],
             '_isCustom' => true,
         ],
@@ -111,6 +123,7 @@ if ($method === 'POST') {
             'sugar_g'        => $num('sugar_g'),
             'cholesterol_mg' => $num('cholesterol_mg'),
             'saturated_fat_g'=> $num('saturated_fat_g'),
+            'micronutrients' => $micros ?: null,
         ],
     ]);
     exit;

@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS custom_foods (
     sugar_g          DECIMAL(7,2)  NULL,
     cholesterol_mg   DECIMAL(7,2)  NULL,
     saturated_fat_g  DECIMAL(7,2)  NULL,
+    micronutrients   JSON          NULL COMMENT 'Vitamin & mineral amounts per serving; NULL = none entered',
     created_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_cf_token (session_token)

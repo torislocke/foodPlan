@@ -4,3 +4,8 @@
 
 ALTER TABLE meal_entries
     ADD COLUMN micronutrients JSON NULL AFTER saturated_fat_g;
+
+-- Same column on custom_foods: vitamins/minerals entered per serving by the
+-- user, keyed as above. NULL means none were entered for that food.
+ALTER TABLE custom_foods
+    ADD COLUMN micronutrients JSON NULL AFTER saturated_fat_g;
