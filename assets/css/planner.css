@@ -510,6 +510,40 @@ a.btn, a.btn-outline { text-decoration: none; }
     vertical-align: middle;
 }
 
+/* ── Recipes tab ──────────────────────────────────────────────────────── */
+.recipe-search-form { display: flex; gap: 8px; align-items: center; }
+.recipe-search-form .search-row { flex: 1; }
+.recipe-fit-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 8px 0;
+    cursor: pointer;
+}
+.recipe-thumb {
+    width: 56px;
+    height: 42px;
+    object-fit: cover;
+    border-radius: 6px;
+    flex-shrink: 0;
+    background: #f3f4f6;
+}
+.result-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.result-pct  { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+.badge-recipe {
+    display: inline-block;
+    background: var(--yellow-bg);
+    color: var(--yellow-text);
+    border: 1px solid #ffe082;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    vertical-align: middle;
+}
+
 /* ── Custom food form ─────────────────────────────────────────────────── */
 .cf-form {
     display: flex;
@@ -555,7 +589,10 @@ a.btn, a.btn-outline { text-decoration: none; }
     flex-direction: column;
     gap: 12px;
 }
-.selected-header { display: flex; justify-content: space-between; align-items: flex-start; }
+.selected-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.selected-title  { flex: 1; min-width: 0; }
+.selected-image  { width: 88px; height: 66px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+.selected-link   { display: inline-block; font-size: 12px; font-weight: 600; color: var(--green); margin-top: 4px; }
 .selected-name { font-weight: 700; font-size: 14px; }
 .selected-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .servings-row  { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -575,6 +612,46 @@ a.btn, a.btn-outline { text-decoration: none; }
 }
 .np-val  { font-size: 16px; font-weight: 800; color: var(--green-dark); line-height: 1; }
 .np-name { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+/* Goal impact — day totals before/after adding the selected food */
+.goal-impact {
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.gi-title    { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+.gi-subtitle { font-size: 11px; font-weight: 700; color: var(--text-muted); margin-top: 4px; }
+.gi-headline { font-size: 13px; }
+.gi-warn     { color: var(--red); }
+.gi-note     { font-size: 12px; color: var(--text-muted); }
+.gi-label    { display: flex; align-items: baseline; gap: 8px; font-size: 12px; margin-bottom: 3px; }
+.gi-name     { font-weight: 600; min-width: 58px; }
+.gi-add      { font-weight: 700; color: var(--green-dark); }
+.gi-total    { margin-left: auto; color: var(--text-muted); white-space: nowrap; }
+.gi-track    { position: relative; }
+.gi-fill-before, .gi-fill-add { position: absolute; top: 0; bottom: 0; }
+.gi-fill-before { left: 0; background: var(--green-light); }
+.gi-fill-add    { background: var(--green); }
+.gi-over .gi-fill-add { background: var(--red); }
+.gi-over .gi-add, .gi-over .gi-total { color: var(--red); }
+.gi-legend { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+.gi-key    { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.gi-key-before { background: var(--green-light); }
+.gi-key-add    { background: var(--green); margin-left: 8px; }
+.gi-chips  { display: flex; flex-wrap: wrap; gap: 6px; }
+.gi-chip {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--green-pale);
+    border: 1px solid var(--green-light);
+    color: var(--green-dark);
+}
+.gi-chip-high { background: var(--green); border-color: var(--green); color: #fff; }
+.gi-chip-over { background: var(--red-bg); border-color: var(--red); color: var(--red); }
 
 /* ── Goals form ───────────────────────────────────────────────────────── */
 .usda-callout {

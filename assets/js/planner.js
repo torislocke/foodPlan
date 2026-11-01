@@ -11,7 +11,7 @@ const state = {
     addContext:   null, // { day, mealType } set when add-modal is open
     selectedFood: null, // food object from search
     customFoods:  [],   // user-defined foods loaded at init
-    activeTab:    'search', // 'search' | 'myfoods'
+    activeTab:    'search', // 'search' | 'recipes' | 'myfoods'
     fitness:      null,     // BMI & calorie result for the saved profile
     microTargets: null,     // { basis, personal, nutrients: [{ key, label, unit, group, target, upper }] }
 };
@@ -90,6 +90,13 @@ async function deleteMealEntry(id) {
 
 async function searchFoods(q) {
     const r = await fetch(`${api}food-search.php?q=${encodeURIComponent(q)}`);
+    return r.json();
+}
+
+async function searchRecipes(q, maxCalories = null) {
+    const params = new URLSearchParams({ q });
+    if (maxCalories) params.set('max_calories', maxCalories);
+    const r = await fetch(`${api}recipe-search.php?${params}`);
     return r.json();
 }
 
@@ -263,13 +270,7 @@ function renderNutritionPanel() {
     const status = pct > 1.05 ? 'over' : pct >= 0.85 ? 'ok' : 'low';
     const msg    = { over: '⚠ Over goal', ok: '✓ On track', low: 'Room for more' };
 
-    const bars = [
-        { key: 'protein_g',  label: 'Protein',  unit: 'g',  goal: goals.protein_g  || 50 },
-        { key: 'carbs_g',    label: 'Carbs',    unit: 'g',  goal: goals.carbs_g    || 250 },
-        { key: 'fat_g',      label: 'Fat',      unit: 'g',  goal: goals.fat_g      || 65 },
-        { key: 'fiber_g',    label: 'Fiber',    unit: 'g',  goal: goals.fiber_g    || 25 },
-        { key: 'sodium_mg',  label: 'Sodium',   unit: 'mg', goal: goals.sodium_mg  || 2300 },
-    ];
+    const bars = goalRows().filter(b => b.key !== 'calories');
 
     document.getElementById('nutritionSummary').innerHTML = `
     <div class="calories-display">
@@ -410,10 +411,14 @@ function setModalTab(tab) {
         b.classList.toggle('active', b.dataset.tab === tab);
     });
     document.getElementById('searchPanel').hidden  = tab !== 'search';
+    document.getElementById('recipesPanel').hidden = tab !== 'recipes';
     document.getElementById('myFoodsPanel').hidden = tab !== 'myfoods';
 
     if (tab === 'myfoods') {
         renderMyFoodsList();
+    } else if (tab === 'recipes') {
+        updateRecipeFitLabel();
+        setTimeout(() => document.getElementById('recipeSearchInput').focus(), 50);
     } else {
         setTimeout(() => document.getElementById('foodSearchInput').focus(), 50);
     }
@@ -430,7 +435,8 @@ function openFoodModal(day, mealType) {
     document.getElementById('foodModalTitle').textContent =
         `Add to ${DAYS[day]} — ${meal.label}`;
 
-    // Reset UI
+    // Reset UI (tabs stay disabled after a previous pick until re-enabled here)
+    document.querySelectorAll('.modal-tab-btn').forEach(b => b.removeAttribute('disabled'));
     setModalTab('search');
     document.getElementById('foodSearchInput').value = '';
     document.getElementById('searchResults').innerHTML =
@@ -517,6 +523,93 @@ function renderSearchResults(foods) {
         const food = foods[idx];
         item.addEventListener('click', () => selectFoodItem(food));
         item.addEventListener('keydown', e => { if (e.key === 'Enter') selectFoodItem(food); });
+    });
+}
+
+// ── Food modal — Recipes tab ──────────────────────────────────────────────── //
+// Searches run on submit rather than as-you-type: the recipe API has a daily quota.
+
+// Calories still available on the day being planned (0 when at or over goal)
+function remainingCalories() {
+    const day = state.addContext?.day ?? state.activeDay;
+    const eaten = (state.summaries[day] || {}).calories || 0;
+    return Math.max(0, Math.round((state.goals.calories || 2000) - eaten));
+}
+
+function updateRecipeFitLabel() {
+    const left = remainingCalories();
+    const box  = document.getElementById('recipeFitCalories');
+    box.disabled = left === 0;
+    if (left === 0) box.checked = false;
+    document.getElementById('recipeFitLabel').textContent = left === 0
+        ? 'No calories left in today\'s goal'
+        : `Only recipes that fit my remaining ${left.toLocaleString()} kcal today`;
+}
+
+async function runRecipeSearch(e) {
+    e?.preventDefault();
+    const q  = document.getElementById('recipeSearchInput').value.trim();
+    const el = document.getElementById('recipeResults');
+    if (q.length < 2) {
+        el.innerHTML = '<p class="search-hint">Type at least 2 characters, then press Search.</p>';
+        return;
+    }
+
+    const fit = document.getElementById('recipeFitCalories').checked;
+    document.getElementById('recipeSpinner').hidden = false;
+    try {
+        const data = await searchRecipes(q, fit ? remainingCalories() : null);
+        if (data.error) {
+            el.innerHTML = `<p class="search-empty">${esc(data.error)}</p>`;
+        } else {
+            renderRecipeResults(data.recipes || []);
+        }
+    } catch {
+        el.innerHTML = '<p class="search-empty">Search failed. Check your connection.</p>';
+    } finally {
+        document.getElementById('recipeSpinner').hidden = true;
+    }
+}
+
+function renderRecipeResults(recipes) {
+    const el = document.getElementById('recipeResults');
+    if (!recipes.length) {
+        el.innerHTML = '<p class="search-empty">No recipes found. Try a different search term.</p>';
+        return;
+    }
+
+    const goalCal = state.goals.calories || 2000;
+    el.innerHTML = recipes.map(r => {
+        const n   = r.nutrients;
+        const cal = n.calories !== null ? Math.round(n.calories) : null;
+        const macros = [
+            n.protein_g !== null ? `P ${Math.round(n.protein_g)}g` : '',
+            n.carbs_g   !== null ? `C ${Math.round(n.carbs_g)}g`   : '',
+            n.fat_g     !== null ? `F ${Math.round(n.fat_g)}g`     : '',
+        ].filter(Boolean).join(' · ');
+        const meta = [
+            r.ready_minutes ? `${r.ready_minutes} min` : '',
+            `serves ${r.recipe_servings}`,
+        ].filter(Boolean).join(' · ');
+        return `
+        <div class="search-result-item" role="option" tabindex="0">
+            ${r.image ? `<img class="recipe-thumb" src="${esc(r.image)}" alt="" loading="lazy">` : ''}
+            <div class="result-info">
+                <div class="result-name">${esc(r.name)}</div>
+                <div class="result-brand"><span class="badge-recipe">Recipe</span> · ${esc(meta)}</div>
+                ${macros ? `<div class="result-brand">Per serving: ${macros}</div>` : ''}
+            </div>
+            <div class="result-side">
+                <span class="result-cal">${cal !== null ? `${cal} kcal` : '—'}</span>
+                ${cal !== null ? `<span class="result-pct">${Math.round(cal / goalCal * 100)}% of goal</span>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+
+    el.querySelectorAll('.search-result-item').forEach((item, idx) => {
+        const recipe = recipes[idx];
+        item.addEventListener('click', () => selectFoodItem(recipe));
+        item.addEventListener('keydown', e => { if (e.key === 'Enter') selectFoodItem(recipe); });
     });
 }
 
@@ -663,19 +756,33 @@ function selectFoodItem(food) {
 
     // Hide tab panels, show selected panel
     document.getElementById('searchPanel').hidden  = true;
+    document.getElementById('recipesPanel').hidden = true;
     document.getElementById('myFoodsPanel').hidden = true;
     document.querySelectorAll('.modal-tab-btn').forEach(b => b.setAttribute('disabled', ''));
 
+    const isRecipe = food.data_type === 'Recipe';
     const isCustomOrBranded = food._isCustom || food.data_type === 'Branded' || food.data_type === 'Custom';
-    const per = isCustomOrBranded
-        ? `${food.serving_size}${food.serving_unit} per serving`
-        : `per 100${food.serving_unit || 'g'}`;
+    const weight = food.serving_unit === 'g' ? ` · ≈${Math.round(food.serving_size)}g` : '';
+    const per = isRecipe
+        ? `serves ${food.recipe_servings}${food.ready_minutes ? ` · ${food.ready_minutes} min` : ''}`
+        : isCustomOrBranded
+            ? `${food.serving_size}${food.serving_unit} per serving`
+            : `per 100${food.serving_unit || 'g'}`;
 
     document.getElementById('selectedName').textContent = food.name;
     document.getElementById('selectedMeta').textContent =
         [food.brand, food.data_type, per].filter(Boolean).join(' · ');
-    document.getElementById('servingUnitLabel').textContent = isCustomOrBranded
-        ? `(1 serving = ${food.serving_size}${food.serving_unit})` : '(× 100g)';
+    document.getElementById('servingUnitLabel').textContent = isRecipe
+        ? `(1 of ${food.recipe_servings} serving${food.recipe_servings === 1 ? '' : 's'}${weight})`
+        : isCustomOrBranded
+            ? `(1 serving = ${food.serving_size}${food.serving_unit})` : '(× 100g)';
+
+    const img  = document.getElementById('selectedImage');
+    const link = document.getElementById('selectedLink');
+    img.hidden  = !(isRecipe && food.image);
+    link.hidden = !(isRecipe && /^https?:\/\//i.test(food.source_url || ''));
+    if (!img.hidden)  img.src   = food.image;
+    if (!link.hidden) link.href = food.source_url;
 
     document.getElementById('servingsInput').value = '1';
     updateNutrientPreview();
@@ -704,6 +811,108 @@ function updateNutrientPreview() {
             ? (n[c.key] * s).toFixed(c.round) : '—';
         return `<div class="np-cell"><div class="np-val">${v}</div><div class="np-name">${c.label}<br>${c.unit}</div></div>`;
     }).join('');
+
+    renderGoalImpact(food, s);
+}
+
+// Daily goals shown as progress bars. `limit` goals are ceilings (going over is
+// a warning); the rest are targets to reach.
+function goalRows() {
+    const g = state.goals;
+    return [
+        { key: 'calories',  label: 'Calories', unit: 'kcal', goal: g.calories  || 2000, limit: true },
+        { key: 'protein_g', label: 'Protein',  unit: 'g',    goal: g.protein_g || 50 },
+        { key: 'carbs_g',   label: 'Carbs',    unit: 'g',    goal: g.carbs_g   || 250, limit: true },
+        { key: 'fat_g',     label: 'Fat',      unit: 'g',    goal: g.fat_g     || 65,  limit: true },
+        { key: 'fiber_g',   label: 'Fiber',    unit: 'g',    goal: g.fiber_g   || 25 },
+        { key: 'sodium_mg', label: 'Sodium',   unit: 'mg',   goal: g.sodium_mg || 2300, limit: true },
+    ];
+}
+
+// How adding `servings` of the selected food changes the day's totals vs. goals
+function renderGoalImpact(food, servings) {
+    const el  = document.getElementById('goalImpact');
+    const ctx = state.addContext;
+    if (!ctx) { el.innerHTML = ''; return; }
+
+    const sum = state.summaries[ctx.day] || {};
+    const n   = food.nutrients;
+    const num = v => Math.round(v).toLocaleString();
+
+    const rows = goalRows().map(r => {
+        const before = sum[r.key] || 0;
+        const add    = (n[r.key] ?? 0) * servings;
+        const after  = before + add;
+        const status = r.limit
+            ? (after > r.goal * 1.05 ? 'over' : after >= r.goal * 0.9 ? 'met' : 'under')
+            : (after >= r.goal ? 'met' : 'under');
+        return { ...r, before, add, after, status, missing: n[r.key] === null || n[r.key] === undefined };
+    });
+
+    const cal      = rows[0];
+    const calLeft  = cal.goal - cal.after;
+    const headline = cal.missing
+        ? 'Calories not reported for this food.'
+        : `This adds <strong>${Math.round(cal.add / cal.goal * 100)}%</strong> of your daily calories. `
+          + (calLeft >= 0
+              ? `You'd have <strong>${num(calLeft)} kcal</strong> left for ${DAYS[ctx.day]}.`
+              : `It puts ${DAYS[ctx.day]} <strong class="gi-warn">${num(-calLeft)} kcal over</strong> your goal.`);
+
+    const bar = r => {
+        const pctBefore = Math.min(100, r.before / r.goal * 100);
+        const pctAfter  = Math.min(100, r.after  / r.goal * 100);
+        return `
+        <div class="gi-row gi-${r.status}">
+            <div class="gi-label">
+                <span class="gi-name">${r.label}</span>
+                <span class="gi-add">${r.missing ? '—' : `+${num(r.add)}${r.unit === 'kcal' ? '' : r.unit}`}</span>
+                <span class="gi-total">${num(r.after)} / ${num(r.goal)} ${r.unit} · ${Math.round(r.after / r.goal * 100)}%</span>
+            </div>
+            <div class="progress-bar-track gi-track">
+                <div class="gi-fill-before" style="width:${pctBefore}%"></div>
+                <div class="gi-fill-add" style="left:${pctBefore}%;width:${Math.max(0, pctAfter - pctBefore)}%"></div>
+            </div>
+        </div>`;
+    };
+
+    el.innerHTML = `
+        <p class="gi-title">Impact on ${DAYS[ctx.day]}'s goals</p>
+        <p class="gi-headline">${headline}</p>
+        ${rows.map(bar).join('')}
+        <p class="gi-legend"><span class="gi-key gi-key-before"></span>Already planned
+            <span class="gi-key gi-key-add"></span>This food</p>
+        ${microImpactHtml(food, servings, ctx.day)}`;
+}
+
+// Vitamins & minerals this serving contributes, as a share of each daily target
+function microImpactHtml(food, servings, day) {
+    const targets = state.microTargets?.nutrients;
+    if (!targets) return '';
+
+    const n      = food.nutrients;
+    const totals = (state.summaries[day] || {}).micros || {};
+    const items  = targets
+        .filter(t => typeof n[t.key] === 'number')
+        .map(t => {
+            const add = n[t.key] * servings;
+            return { ...t, pct: add / t.target, over: t.upper && (totals[t.key] || 0) + add > t.upper };
+        });
+
+    if (!items.length) {
+        return '<p class="gi-note">No vitamin &amp; mineral data for this food.</p>';
+    }
+
+    const notable = items.filter(i => i.pct >= 0.1 || i.over).sort((a, b) => b.pct - a.pct);
+    const chips = notable.map(i => `
+        <span class="gi-chip ${i.over ? 'gi-chip-over' : i.pct >= 0.5 ? 'gi-chip-high' : ''}"
+              title="${i.over ? `Day total would pass the ${i.upper} ${i.unit} upper limit` : `${Math.round(i.pct * 100)}% of the daily target`}">
+            ${i.over ? '⚠ ' : ''}${esc(i.label)} ${Math.round(i.pct * 100)}%
+        </span>`).join('');
+
+    return `
+        <p class="gi-subtitle">Vitamins &amp; minerals — % of daily target</p>
+        ${chips ? `<div class="gi-chips">${chips}</div>`
+                : '<p class="gi-note">Less than 10% of the daily target for every vitamin &amp; mineral.</p>'}`;
 }
 
 async function confirmFoodAdd() {
@@ -1268,6 +1477,10 @@ function setupEventListeners() {
     document.getElementById('cancelFoodAdd').addEventListener('click', closeFoodModal);
     document.getElementById('confirmFoodAdd').addEventListener('click', confirmFoodAdd);
     document.getElementById('foodSearchInput').addEventListener('input', handleSearchInput);
+    document.getElementById('recipeSearchForm').addEventListener('submit', runRecipeSearch);
+    document.getElementById('recipeFitCalories').addEventListener('change', () => {
+        if (document.getElementById('recipeSearchInput').value.trim().length >= 2) runRecipeSearch();
+    });
     document.getElementById('servingsInput').addEventListener('input', updateNutrientPreview);
     document.getElementById('clearSelection').addEventListener('click', () => {
         state.selectedFood = null;

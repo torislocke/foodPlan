@@ -62,6 +62,7 @@ require_once __DIR__ . '/common/header.php';
                 <!-- ── Tab bar ── -->
                 <div class="modal-tab-bar">
                     <button type="button" class="modal-tab-btn active" data-tab="search">Search USDA</button>
+                    <button type="button" class="modal-tab-btn" data-tab="recipes">Recipes</button>
                     <button type="button" class="modal-tab-btn" data-tab="myfoods">My Custom Foods</button>
                 </div>
 
@@ -75,6 +76,26 @@ require_once __DIR__ . '/common/header.php';
                     </div>
                     <div id="searchResults" class="search-results" role="listbox">
                         <p class="search-hint">Type at least 2 characters. Your custom foods appear first.</p>
+                    </div>
+                </div>
+
+                <!-- ── Recipes tab ── -->
+                <div id="recipesPanel" class="modal-tab-panel" hidden>
+                    <form id="recipeSearchForm" class="recipe-search-form" novalidate>
+                        <div class="search-row">
+                            <input type="search" id="recipeSearchInput" class="search-input"
+                                placeholder="Search recipes (e.g. chicken curry, lentil soup)…"
+                                autocomplete="off" spellcheck="false">
+                            <span class="search-spinner" id="recipeSpinner" hidden>⟳</span>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-sm">Search</button>
+                    </form>
+                    <label class="recipe-fit-toggle">
+                        <input type="checkbox" id="recipeFitCalories">
+                        <span id="recipeFitLabel">Only recipes that fit my remaining calories</span>
+                    </label>
+                    <div id="recipeResults" class="search-results" role="listbox">
+                        <p class="search-hint">Search for a recipe to see its nutrition per serving.</p>
                     </div>
                 </div>
 
@@ -181,9 +202,11 @@ require_once __DIR__ . '/common/header.php';
                 <!-- ── Selected food (shown after pick from either tab) ── -->
                 <div id="selectedFoodPanel" class="selected-panel" hidden>
                     <div class="selected-header">
-                        <div>
+                        <img class="selected-image" id="selectedImage" alt="" hidden>
+                        <div class="selected-title">
                             <p class="selected-name" id="selectedName"></p>
                             <p class="selected-meta" id="selectedMeta"></p>
+                            <a class="selected-link" id="selectedLink" target="_blank" rel="noopener" hidden>View full recipe ↗</a>
                         </div>
                         <button class="btn-text" id="clearSelection">Change</button>
                     </div>
@@ -198,6 +221,10 @@ require_once __DIR__ . '/common/header.php';
                     </div>
 
                     <div class="nutrient-preview" id="nutrientPreview"></div>
+
+                    <div class="goal-impact" id="goalImpact" aria-live="polite">
+                        <!-- Rendered by JS: how this food changes the day's totals -->
+                    </div>
                 </div>
 
             </div>
